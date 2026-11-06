@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>マンション管理士 オリジナル問題集</title>
+<style>
+:root{--bg:#FFF9F1;--card:#FFFFFF;--text:#3A3049;--muted:#8A7F95;--border:#F0E3D3;--bp:#6255D8;--ok:#0BA58F;--ng:#E5536B;--shadow:0 6px 18px rgba(163,116,76,.10)}
+*{box-sizing:border-box}
+body{margin:0;font-family:"Hiragino Maru Gothic ProN","Hiragino Sans","Noto Sans JP",system-ui,sans-serif;background:linear-gradient(180deg,#FFF8EE 0%,#FFF3F5 45%,#F4F6FF 100%);background-attachment:fixed;color:var(--text);line-height:1.65}
+#app{max-width:880px;margin:0 auto;padding:16px}
+h1{font-size:24px;margin:8px 0 2px}
+h2{font-size:20px;margin:4px 0 8px}
+.sub{color:var(--muted);font-size:13px;margin-bottom:10px}
+.card{background:var(--card);border:2px solid var(--border);border-radius:24px;padding:22px;margin-top:14px;box-shadow:var(--shadow)}
+.btn{border:2px solid var(--border);background:#fff;border-radius:999px;padding:9px 18px;cursor:pointer;font:inherit;font-weight:700;color:var(--text);box-shadow:0 3px 0 rgba(163,116,76,.18)}
+.btn:active{transform:translateY(2px);box-shadow:0 1px 0 rgba(163,116,76,.18)}
+.btn.primary{background:var(--bp);color:#fff;border-color:var(--bp)}
+.btn:disabled{opacity:.45;cursor:default}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.spread{justify-content:space-between}
+.pbar{height:12px;background:#F3E9DA;border-radius:999px;overflow:hidden;margin:6px 0}
+.pbar>i{display:block;height:100%;background:var(--bp);border-radius:999px}
+.pbar.ok>i{background:var(--ok)}
+.meta{color:var(--muted);font-size:13px}
+.stem{font-size:18px;font-weight:700;margin:8px 0 12px;white-space:pre-wrap}
+.choices{display:grid;gap:10px;margin:12px 0}
+.choice{text-align:left;border:2px solid var(--border);background:#fff;border-radius:18px;padding:12px 14px;cursor:pointer;font:inherit;min-height:48px;width:100%}
+.choice.sel{border-color:var(--bp);background:#F1EFFF}
+.choice.right{border-color:var(--ok);background:#EAFBF6}
+.choice.wrong{border-color:var(--ng);background:#FDEEF1}
+.choice:disabled{cursor:default;opacity:.92}
+.expl{border-top:2px dashed var(--border);margin-top:14px;padding-top:12px}
+.expl .verdict{font-weight:800;font-size:18px}
+.verdict.ok{color:var(--ok)}.verdict.ng{color:var(--ng)}
+.optline{margin:8px 0;padding:10px 12px;border-radius:14px;background:#FBF7F0;font-size:15px}
+.optline .tag{font-weight:800;margin-right:6px}
+.optline .tag.t{color:var(--ok)}.optline .tag.f{color:var(--ng)}
+.basis{font-size:13px;color:var(--muted);margin-top:10px}
+.basis li{margin:2px 0}
+.grid{display:grid;grid-template-columns:repeat(10,1fr);gap:6px;margin:12px 0}
+.grid button{border:2px solid var(--border);background:#fff;border-radius:10px;padding:6px 0;cursor:pointer;font:inherit;font-weight:700}
+.grid button.done{background:#EDEBFF}
+.grid button.right{background:#D8F5EE;border-color:var(--ok)}
+.grid button.wrong{background:#FBDCE2;border-color:var(--ng)}
+.grid button.now{outline:3px solid var(--bp)}
+.timer{font-weight:800;font-size:18px}
+.fieldbar{margin:8px 0}
+.fieldbar .fname{font-size:13px;font-weight:700}
+.score-big{font-size:32px;font-weight:800}
+.notice{font-size:12px;color:var(--muted);margin-top:16px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="data.js"></script>
+<script>
+"use strict";
+const app = document.getElementById("app");
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const DATA = window.EXAM_DATA;
+const store = {
+  get(k, dflt) { try { const v = localStorage.getItem("kanrishi:" + k); return v ? JSON.parse(v) : dflt; } catch (e) { return dflt; } },
+  set(k, v) { try { localStorage.setItem("kanrishi:" + k, JSON.stringify(v)); } catch (e) {} }
+};
+let view = { name: "home" };
+
+function setData(n) { return DATA.sets.find((s) => s.set === n); }
+function records(n) { return store.get("rec" + n, {}); } // {qid: pickedNo}
+function savePick(n, qid, picked) { const r = records(n); r[qid] = picked; store.set("rec" + n, r); }
+
+function progressOf(n) {
+  const qs = setData(n).questions, r = records(n);
+  let answered = 0, correct = 0;
+  const byField = {};
+  for (const q of qs) {
+    const f = byField[q.field] || (byField[q.field] = { name: q.field_name, total: 0, answered: 0, correct: 0 });
+    f.total++;
+    if (r[q.id] != null) { answered++; f.answered++; if (r[q.id] === q.answer) { correct++; f.correct++; } }
+  }
+  return { answered, correct, total: qs.length, byField };
+}
+
+function render() {
+  if (view.name === "home") return renderHome();
+  if (view.name === "practice") return renderPractice();
+  if (view.name === "exam") return renderExam();
+  if (view.name === "result") return renderResult();
+}
+
+function renderHome() {
+  let h = "<h1>マンション管理士 オリジナル問題集</h1><div class='sub'>本試験形式（50問・四肢択一）のオリジナル問題です。直近の法改正・判例を中心に、本試験よりかなり難しめに作っています。</div>";
+  for (const s of DATA.sets) {
+    const p = progressOf(s.set);
+    const pct = p.total ? Math.round((p.answered / p.total) * 100) : 0;
+    const acc = p.answered ? Math.round((p.correct / p.answered) * 100) : 0;
+    h += "<div class='card'><h2>" + esc(s.title) + "（全" + p.total + "問）</h2>"
+      + "<div class='meta'>解いた問題 " + p.answered + " / " + p.total + "問　正解 " + p.correct + "問" + (p.answered ? "（正答率 " + acc + "%）" : "") + "</div>"
+      + "<div class='pbar'><i style='width:" + pct + "%'></i></div>";
+    for (const f of Object.values(p.byField)) {
+      const fp = f.total ? Math.round((f.answered / f.total) * 100) : 0;
+      h += "<div class='fieldbar'><span class='fname'>" + esc(f.name) + "</span> <span class='meta'>" + f.answered + "/" + f.total + "問・正解" + f.correct + "</span><div class='pbar ok'><i style='width:" + fp + "%'></i></div></div>";
+    }
+    h += "<div class='row' style='margin-top:10px'>"
+      + "<button class='btn primary' data-act='practice' data-set='" + s.set + "'>" + (p.answered ? "練習のつづき" : "練習モード") + "</button>"
+      + "<button class='btn' data-act='exam' data-set='" + s.set + "'>模試モード（120分）</button>"
+      + (p.answered ? "<button class='btn' data-act='reset' data-set='" + s.set + "'>記録をリセット</button>" : "")
+      + "</div></div>";
+  }
+  h += "<div class='notice'>非公式の学習用サイトです。マンション管理業協会および公式試験とは無関係です。問題はすべてオリジナルで、解説には根拠条文を付けています。学習記録はこの端末の中だけに保存されます。</div>";
+  app.innerHTML = h;
+}
+
+function explanationHtml(q, picked) {
+  const ok = picked === q.answer;
+  let h = "<div class='expl'><div class='verdict " + (ok ? "ok" : "ng") + "'>" + (ok ? "正解！" : "不正解…") + "　正解は " + q.answer + "</div>"
+    + "<p>" + esc(q.explanation.summary) + "</p>";
+  for (const o of q.explanation.options) {
+    h += "<div class='optline'><span class='tag " + (o.correct ? "t" : "f") + "'>" + o.no + (o.correct ? " ○（記述は正しい）" : " ×（記述は誤り）") + "</span>" + esc(o.text) + "</div>";
+  }
+  if (q.explanation.legal_basis && q.explanation.legal_basis.length) {
+    h += "<div class='basis'>根拠：<ul>" + q.explanation.legal_basis.map((b) => "<li>" + esc(b) + "</li>").join("") + "</ul></div>";
+  }
+  return h + "</div>";
+}
+
+function renderPractice() {
+  const s = setData(view.set), qs = s.questions, q = qs[view.idx];
+  const r = records(view.set), picked = r[q.id];
+  const p = progressOf(view.set);
+  let h = "<div class='row spread'><button class='btn' data-act='home'>← もどる</button><span class='meta'>" + esc(s.title) + "　" + (view.idx + 1) + " / " + qs.length + "問　正解 " + p.correct + "問</span></div>"
+    + "<div class='pbar'><i style='width:" + Math.round((p.answered / p.total) * 100) + "%'></i></div>"
+    + "<div class='card'><div class='meta'>分野：" + esc(q.field_name) + "　テーマ：" + esc(q.theme) + "</div>"
+    + "<div class='stem'>問" + (view.idx + 1) + "　" + esc(q.question) + "</div><div class='choices'>";
+  q.options.forEach((opt, i) => {
+    const no = i + 1;
+    let cls = "choice";
+    if (picked != null) { if (no === q.answer) cls += " right"; else if (no === picked) cls += " wrong"; }
+    else if (view.sel === no) cls += " sel";
+    h += "<button class='" + cls + "' data-pick='" + no + "'" + (picked != null ? " disabled" : "") + ">" + no + "．" + esc(opt) + "</button>";
+  });
+  h += "</div>";
+  if (picked != null) h += explanationHtml(q, picked);
+  h += "<div class='row spread' style='margin-top:14px'><button class='btn' data-act='prev'" + (view.idx === 0 ? " disabled" : "") + ">← 前の問題</button>"
+    + "<button class='btn primary' data-act='next'" + (view.idx === qs.length - 1 ? " disabled" : "") + ">次の問題 →</button></div></div>"
+    + "<div class='card'><div class='meta'>問題一覧（タップで移動）</div><div class='grid'>"
+    + qs.map((x, i) => {
+        const rp = r[x.id];
+        const cls = rp == null ? "" : (rp === x.answer ? "right" : "wrong");
+        return "<button data-jump='" + i + "' class='" + cls + (i === view.idx ? " now" : "") + "'>" + (i + 1) + "</button>";
+      }).join("")
+    + "</div></div>";
+  app.innerHTML = h;
+}
+
+let examTimer = null;
+function renderExam() {
+  const s = setData(view.set), qs = s.questions, q = qs[view.idx];
+  const a = view.answers;
+  const left = Math.max(0, view.deadline - Date.now());
+  const mm = String(Math.floor(left / 60000)), ss = String(Math.floor((left % 60000) / 1000)).padStart(2, "0");
+  let h = "<div class='row spread'><span class='timer'>残り " + mm + ":" + ss + "</span><span class='meta'>模試モード　" + esc(s.title) + "　回答済み " + Object.keys(a).length + " / " + qs.length + "</span><button class='btn primary' data-act='finish'>採点する</button></div>"
+    + "<div class='card'><div class='meta'>分野：" + esc(q.field_name) + "</div>"
+    + "<div class='stem'>問" + (view.idx + 1) + "　" + esc(q.question) + "</div><div class='choices'>";
+  q.options.forEach((opt, i) => {
+    const no = i + 1;
+    h += "<button class='choice" + (a[q.id] === no ? " sel" : "") + "' data-epick='" + no + "'>" + no + "．" + esc(opt) + "</button>";
+  });
+  h += "</div><div class='row spread' style='margin-top:14px'><button class='btn' data-act='prev'" + (view.idx === 0 ? " disabled" : "") + ">← 前の問題</button>"
+    + "<button class='btn' data-act='next'" + (view.idx === qs.length - 1 ? " disabled" : "") + ">次の問題 →</button></div></div>"
+    + "<div class='card'><div class='meta'>マークシート（タップで移動）</div><div class='grid'>"
+    + qs.map((x, i) => "<button data-jump='" + i + "' class='" + (a[x.id] != null ? "done" : "") + (i === view.idx ? " now" : "") + "'>" + (i + 1) + "</button>").join("")
+    + "</div></div>";
+  app.innerHTML = h;
+}
+
+function renderResult() {
+  const s = setData(view.set), qs = s.questions, a = view.answers;
+  let correct = 0; const byField = {};
+  for (const q of qs) {
+    const f = byField[q.field] || (byField[q.field] = { name: q.field_name, total: 0, correct: 0 });
+    f.total++; if (a[q.id] === q.answer) { correct++; f.correct++; }
+  }
+  let h = "<div class='card'><h2>模試の結果（" + esc(s.title) + "）</h2><div class='score-big'>" + correct + " / " + qs.length + " 点</div>"
+    + "<div class='meta'>正答率 " + Math.round((correct / qs.length) * 100) + "%</div>";
+  for (const f of Object.values(byField)) h += "<div class='fieldbar'><span class='fname'>" + esc(f.name) + "</span> <span class='meta'>" + f.correct + "/" + f.total + "</span><div class='pbar ok'><i style='width:" + Math.round((f.correct / f.total) * 100) + "%'></i></div></div>";
+  h += "<div class='row' style='margin-top:12px'><button class='btn primary' data-act='home'>トップへもどる</button></div></div>";
+  qs.forEach((q, i) => {
+    const picked = a[q.id];
+    h += "<div class='card'><div class='meta'>問" + (i + 1) + "　分野：" + esc(q.field_name) + "</div><div class='stem'>" + esc(q.question) + "</div><div class='choices'>"
+      + q.options.map((opt, j) => {
+          const no = j + 1;
+          let cls = "choice";
+          if (no === q.answer) cls += " right"; else if (no === picked) cls += " wrong";
+          return "<button class='" + cls + "' disabled>" + no + "．" + esc(opt) + "</button>";
+        }).join("")
+      + "</div>" + (picked == null ? "<div class='expl'><div class='verdict ng'>未回答　正解は " + q.answer + "</div><p>" + esc(q.explanation.summary) + "</p>"
+          + q.explanation.options.map((o) => "<div class='optline'><span class='tag " + (o.correct ? "t" : "f") + "'>" + o.no + (o.correct ? " ○" : " ×") + "</span>" + esc(o.text) + "</div>").join("")
+          + (q.explanation.legal_basis && q.explanation.legal_basis.length ? "<div class='basis'>根拠：<ul>" + q.explanation.legal_basis.map((b) => "<li>" + esc(b) + "</li>").join("") + "</ul></div>" : "") + "</div>"
+        : explanationHtml(q, picked))
+      + "</div>";
+  });
+  app.innerHTML = h;
+  window.scrollTo(0, 0);
+}
+
+app.addEventListener("click", (e) => {
+  const t = e.target.closest("[data-act],[data-pick],[data-epick],[data-jump]");
+  if (!t) return;
+  if (t.dataset.jump != null) { view.idx = Number(t.dataset.jump); render(); window.scrollTo(0, 0); return; }
+  if (t.dataset.pick != null) {
+    const s = setData(view.set), q = s.questions[view.idx];
+    savePick(view.set, q.id, Number(t.dataset.pick));
+    render(); return;
+  }
+  if (t.dataset.epick != null) {
+    const s = setData(view.set), q = s.questions[view.idx];
+    view.answers[q.id] = Number(t.dataset.epick);
+    render(); return;
+  }
+  const act = t.dataset.act;
+  if (act === "home") { if (examTimer) { clearInterval(examTimer); examTimer = null; } view = { name: "home" }; render(); }
+  else if (act === "practice") {
+    const n = Number(t.dataset.set), r = records(n), qs = setData(n).questions;
+    let idx = qs.findIndex((q) => r[q.id] == null); if (idx < 0) idx = 0;
+    view = { name: "practice", set: n, idx }; render(); window.scrollTo(0, 0);
+  }
+  else if (act === "exam") {
+    const n = Number(t.dataset.set);
+    view = { name: "exam", set: n, idx: 0, answers: {}, deadline: Date.now() + 120 * 60000 };
+    if (examTimer) clearInterval(examTimer);
+    examTimer = setInterval(() => { if (view.name === "exam") render(); }, 1000);
+    render(); window.scrollTo(0, 0);
+  }
+  else if (act === "reset") { store.set("rec" + t.dataset.set, {}); render(); }
+  else if (act === "prev") { view.idx--; render(); window.scrollTo(0, 0); }
+  else if (act === "next") { view.idx++; render(); window.scrollTo(0, 0); }
+  else if (act === "finish") {
+    if (examTimer) { clearInterval(examTimer); examTimer = null; }
+    const ans = view.answers;
+    for (const q of setData(view.set).questions) if (ans[q.id] != null) savePick(view.set, q.id, ans[q.id]);
+    view = { name: "result", set: view.set, answers: ans }; render();
+  }
+});
+render();
+</script>
+</body>
+</html>
