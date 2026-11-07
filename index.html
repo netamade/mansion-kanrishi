@@ -49,6 +49,35 @@ h2{font-size:20px;margin:4px 0 8px}
 .fieldbar .fname{font-size:13px;font-weight:700}
 .score-big{font-size:32px;font-weight:800}
 .notice{font-size:12px;color:var(--muted);margin-top:16px}
+.countdown{margin-top:8px;border-radius:24px;padding:16px 20px;background:linear-gradient(135deg,#6255D8 0%,#8F6BE8 60%,#E58AB0 100%);color:#fff;box-shadow:var(--shadow)}
+.countdown .cd-main{font-size:24px;font-weight:800;line-height:1.3}
+.countdown .cd-main b{font-size:34px;margin:0 2px}
+.countdown .cd-sub{font-size:14px;opacity:.95;margin-top:2px}
+.modes{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+.mode{background:var(--card);border:2px solid var(--border);border-radius:20px;padding:12px 14px;box-shadow:var(--shadow);font-size:14px}
+.mode .mname{font-weight:800;color:var(--bp);font-size:15px}
+.summary-wrap{display:grid;grid-template-columns:minmax(0,320px) 1fr;gap:16px;align-items:start}
+.radar{width:100%;max-width:320px;aspect-ratio:1/1;display:block;margin:0 auto}
+.ftable{width:100%;border-collapse:collapse;font-size:13px;margin-top:6px}
+.ftable th,.ftable td{padding:5px 4px;border-bottom:1px dashed var(--border);text-align:right}
+.ftable th:first-child,.ftable td:first-child{text-align:left}
+.prob{margin-top:12px;padding:12px 14px;border-radius:18px;background:#F1EFFF}
+.prob .pnum{font-size:28px;font-weight:800;color:var(--bp)}
+.small{font-size:12px;color:var(--muted)}
+.fbtns{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px}
+.fbtn{text-align:left;border:2px solid var(--border);background:#fff;border-radius:18px;padding:12px 14px;cursor:pointer;font:inherit;color:var(--text);box-shadow:0 3px 0 rgba(163,116,76,.18)}
+.fbtn:active{transform:translateY(2px);box-shadow:0 1px 0 rgba(163,116,76,.18)}
+.fbtn .fn{font-weight:800;display:block}
+.ichi-stmt{font-size:17px;font-weight:700;margin:10px 0;padding:14px;border-radius:18px;background:#FBF7F0;white-space:pre-wrap}
+.ox{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.ox .btn{font-size:22px;padding:10px 0}
+details.ctx{font-size:13px;color:var(--muted);margin-top:6px}
+@media (max-width:600px){
+  .modes,.fbtns{grid-template-columns:1fr}
+  .summary-wrap{grid-template-columns:1fr}
+  .countdown .cd-main{font-size:20px}
+  .countdown .cd-main b{font-size:28px}
+}
 </style>
 </head>
 <body>
@@ -81,6 +110,215 @@ function progressOf(n) {
   return { answered, correct, total: qs.length, byField };
 }
 
+// ===== 機能追加 v1：定数・分野マッピング =====
+// 試験日（日付の定数のみ。残り日数は表示のたびに端末の現在日時から算出する）
+const EXAM_DATE = { y: 2026, m: 11, d: 29 };
+const PASS_LINE = 40; // 合格目安ライン（令和7年度42点・令和6年度37点）
+// 公式4分野（weight＝本試験の配点。サイト収録問題の配分 23/7/15/5 に一致）
+const OFFICIAL_FIELDS = [
+  { id: 1, name: "管理に関する法令及び実務", short: "法令・実務", weight: 23 },
+  { id: 2, name: "管理組合の運営の円滑化", short: "運営の円滑化", weight: 7 },
+  { id: 3, name: "建物及び附属施設の構造及び設備", short: "建物・設備", weight: 15 },
+  { id: 4, name: "マンション管理の適正化の推進に関する法律", short: "適正化法", weight: 5 }
+];
+// set4（頻出問題コーナー）の表示カテゴリ（field_name）→ 公式分野
+const SET4_CATEGORY_TO_FIELD = {
+  "区分所有法等": 1, "標準管理規約": 1, "民法・その他法令": 1,
+  "建築・設備": 3, "会計": 2, "マンション管理適正化法": 4, "適正化法": 4
+};
+// 問題 → 公式分野ID。本編（set1〜3）は既存の field をそのまま使う
+function officialField(q) {
+  if (q.set === 4) return SET4_CATEGORY_TO_FIELD[q.field_name] || null;
+  return q.field;
+}
+const ALL_QUESTIONS = DATA.sets.flatMap((s) => s.questions);
+const Q_POS = {}; // qid → 回の中での問番号（1始まり）
+for (const s of DATA.sets) s.questions.forEach((q, i) => { Q_POS[q.id] = i + 1; });
+function sourceLabel(q) { const s = setData(q.set); return (s ? s.title : "") + "・問" + Q_POS[q.id]; }
+
+// 既存の学習記録（kanrishi:rec{回} = {qid: 選んだ肢番号}）を全回まとめて読む
+function allRecords() { const m = {}; for (const s of DATA.sets) m[s.set] = records(s.set); return m; }
+function pickOf(recs, q) { const r = recs[q.set]; return r ? r[q.id] : undefined; }
+
+// 公式分野別の集計（解いた数／全問題数／正解数）
+function officialStats() {
+  const recs = allRecords();
+  const st = {};
+  for (const f of OFFICIAL_FIELDS) st[f.id] = { ...f, total: 0, answered: 0, correct: 0 };
+  for (const q of ALL_QUESTIONS) {
+    const f = st[officialField(q)];
+    if (!f) continue;
+    f.total++;
+    const p = pickOf(recs, q);
+    if (p != null) { f.answered++; if (p === q.answer) f.correct++; }
+  }
+  return OFFICIAL_FIELDS.map((f) => st[f.id]);
+}
+
+// JST基準の「試験日 − 今日」の日数（呼び出すたびに現在日時から計算）
+function daysUntilExam() {
+  const now = new Date();
+  const jst = new Date(now.getTime() + 9 * 3600 * 1000); // UTC+9 に寄せて UTC getter で JST の日付を得る
+  const today = Date.UTC(jst.getUTCFullYear(), jst.getUTCMonth(), jst.getUTCDate());
+  const exam = Date.UTC(EXAM_DATE.y, EXAM_DATE.m - 1, EXAM_DATE.d);
+  return Math.round((exam - today) / 86400000);
+}
+
+function countdownHtml() {
+  const d = daysUntilExam();
+  let main, sub;
+  if (d > 0) {
+    main = "試験まであと<b>" + d + "</b>日！";
+    sub = d >= 14 ? "コツコツ積み上げていきましょう" : d >= 7 ? "仕上げの時期です。苦手分野を潰しましょう" : "ラストスパート！";
+  } else if (d === 0) { main = "今日が試験日！"; sub = "落ち着いて、いつも通りで大丈夫"; }
+  else { main = "試験お疲れさまでした"; sub = "ここまでの積み重ね、本当にお疲れさまでした。"; }
+  return "<div class='countdown'><div class='cd-main'>" + main + "</div><div class='cd-sub'>" + esc(sub)
+    + "　<span style='opacity:.85'>（本試験 " + EXAM_DATE.y + "年" + EXAM_DATE.m + "月" + EXAM_DATE.d + "日）</span></div></div>";
+}
+
+function modesHtml() {
+  return "<div class='modes'>"
+    + "<div class='mode'><div class='mname'>練習モード</div>1問ごとにすぐ答え合わせができます。解説を読みながら自分のペースで進められます。</div>"
+    + "<div class='mode'><div class='mname'>模試モード</div>本番と同じ50問・120分です。時間を計って実力試しができます。</div>"
+    + "</div>";
+}
+
+// 推定得点（50点満点）＝ Σ 配点 × [ カバー率 × 正答率 ＋ (1 − カバー率) × 0.25 ]
+function estimateScore(stats) {
+  let sum = 0;
+  for (const f of stats) {
+    const cov = f.total ? f.answered / f.total : 0;
+    const acc = f.answered ? f.correct / f.answered : 0;
+    sum += f.weight * (cov * acc + (1 - cov) * 0.25);
+  }
+  return sum;
+}
+function passProbLabel(diff) {
+  if (diff >= 6) return "90%前後";
+  if (diff >= 3) return "75%前後";
+  if (diff >= 0) return "55%前後";
+  if (diff >= -3) return "35%前後";
+  if (diff >= -6) return "20%前後";
+  return "10%未満";
+}
+
+function summaryHtml(stats) {
+  const any = stats.some((f) => f.answered > 0);
+  let rows = "";
+  for (const f of stats) {
+    rows += "<tr><td>" + esc(f.short) + "</td><td>" + f.answered + " / " + f.total + "問</td><td>"
+      + (f.answered ? Math.round((f.correct / f.answered) * 100) + "%" : "未挑戦") + "</td></tr>";
+  }
+  let prob;
+  if (!any) {
+    prob = "<div class='prob'><b>合格確率の目安</b><div style='margin-top:4px'>まだデータがありません。まず1問解いてみましょう</div></div>";
+  } else {
+    const est = estimateScore(stats), diff = est - PASS_LINE;
+    prob = "<div class='prob'><b>合格確率の目安</b><div class='pnum'>" + passProbLabel(diff) + "</div>"
+      + "<div style='font-size:14px'>推定得点 <b>" + est.toFixed(1) + "点</b> / 50点　目安ライン" + PASS_LINE + "点（年度により37〜42点で変動）"
+      + "　差 " + (diff >= 0 ? "+" : "") + diff.toFixed(1) + "点</div>"
+      + "<div class='small' style='margin-top:6px'>推定得点は、分野ごとに「本試験の配点（23／7／15／5点）×［カバー率×正答率＋（1−カバー率）×25%］」を合計したものです。カバー率＝その分野で解いた問題数÷収録問題数。まだ解いていない分は4択の当てずっぽう（25%）として保守的に見積もっています。</div>"
+      + "<div class='small' style='margin-top:4px'>※ あくまで目安です。このサイトの問題での正答率から計算した簡易推定で、実際の合否を保証するものではありません</div></div>";
+  }
+  return "<div class='card'><h2>成績サマリー</h2><div class='summary-wrap'>"
+    + "<canvas id='radar' class='radar' aria-label='分野別正答率のレーダーチャート'></canvas>"
+    + "<div><table class='ftable'><thead><tr><th>分野</th><th>解いた数／全問題数</th><th>正答率</th></tr></thead><tbody>" + rows + "</tbody></table>"
+    + "<div class='small' style='margin-top:6px'>全回（第1回〜第3回＋頻出問題コーナー）の練習・模試の最新結果から集計しています。頻出問題コーナーは、区分所有法等・標準管理規約・民法・その他法令→法令・実務、建築・設備→建物・設備、会計→運営の円滑化、適正化法→適正化法として集計します。</div></div>"
+    + "</div>" + prob + "</div>";
+}
+
+// Canvas に自前描画するレーダーチャート（値＝分野別正答率。未挑戦は0）
+function drawRadar(stats) {
+  const cv = document.getElementById("radar");
+  if (!cv) return;
+  const cssW = cv.clientWidth || 300, dpr = window.devicePixelRatio || 1;
+  cv.width = Math.round(cssW * dpr); cv.height = Math.round(cssW * dpr);
+  const ctx = cv.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const W = cssW, cx = W / 2, cy = W / 2, R = W * 0.3, n = stats.length;
+  const ang = (i) => -Math.PI / 2 + (2 * Math.PI * i) / n;
+  const pt = (i, r) => [cx + Math.cos(ang(i)) * r, cy + Math.sin(ang(i)) * r];
+  ctx.clearRect(0, 0, W, W);
+  ctx.lineWidth = 1;
+  for (let k = 1; k <= 4; k++) {
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) { const [x, y] = pt(i, (R * k) / 4); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+    ctx.closePath(); ctx.strokeStyle = k === 4 ? "#E2D3BF" : "#F0E3D3"; ctx.stroke();
+  }
+  for (let i = 0; i < n; i++) { const [x, y] = pt(i, R); ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(x, y); ctx.strokeStyle = "#F0E3D3"; ctx.stroke(); }
+  ctx.fillStyle = "#8A7F95"; ctx.font = "10px sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+  for (let k = 1; k <= 4; k++) ctx.fillText(k * 25 + "%", cx + 3, cy - (R * k) / 4);
+  const vals = stats.map((f) => (f.answered ? f.correct / f.answered : 0));
+  ctx.beginPath();
+  vals.forEach((v, i) => { const [x, y] = pt(i, R * v); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+  ctx.closePath(); ctx.fillStyle = "rgba(98,85,216,.25)"; ctx.fill(); ctx.strokeStyle = "#6255D8"; ctx.lineWidth = 2; ctx.stroke();
+  vals.forEach((v, i) => { const [x, y] = pt(i, R * v); ctx.beginPath(); ctx.arc(x, y, 3.5, 0, Math.PI * 2); ctx.fillStyle = "#6255D8"; ctx.fill(); });
+  // 軸ラベル（分野名＋正答率）。キャンバス端で切れないよう横位置を収める
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  stats.forEach((f, i) => {
+    const c = Math.cos(ang(i)), sn = Math.sin(ang(i));
+    const label2 = f.answered ? Math.round(vals[i] * 100) + "%" : "未挑戦";
+    ctx.font = "bold 12px sans-serif";
+    const w = Math.max(ctx.measureText(f.short).width, ctx.measureText(label2).width);
+    let [x, y] = pt(i, R + 14);
+    if (Math.abs(c) >= 0.2) x += (c > 0 ? 1 : -1) * w / 2;
+    x = Math.min(W - w / 2 - 2, Math.max(w / 2 + 2, x));
+    const dy = sn < -0.5 ? -14 : sn > 0.5 ? 2 : -7;
+    ctx.fillStyle = "#3A3049"; ctx.fillText(f.short, x, y + dy);
+    ctx.font = "11px sans-serif"; ctx.fillStyle = "#8A7F95"; ctx.fillText(label2, x, y + dy + 14);
+  });
+}
+
+function fieldCornerHtml(stats) {
+  let h = "<div class='card'><h2>分野別でやりたい場合はこちら</h2><div class='meta'>その分野の問題だけを全回から集めてシャッフルし、練習モードと同じ形式（即時採点＋全肢解説）で出題します。記録は各回の学習記録に保存されます。</div><div class='fbtns'>";
+  for (const f of stats) {
+    h += "<button class='fbtn' data-act='fieldpractice' data-field='" + f.id + "'><span class='fn'>" + esc(f.name) + "</span>"
+      + "<span class='meta'>収録 " + f.total + "問　あなたの正答率 " + (f.answered ? Math.round((f.correct / f.answered) * 100) + "%（" + f.answered + "問中）" : "未挑戦") + "</span></button>";
+  }
+  return h + "</div></div>";
+}
+
+// ===== 一問一答（記録は画面内のみ） =====
+let ichi = null; // { q, i, ans }
+const ichiScore = { n: 0, ok: 0 };
+function newIchi() {
+  const q = ALL_QUESTIONS[Math.floor(Math.random() * ALL_QUESTIONS.length)];
+  ichi = { q, i: Math.floor(Math.random() * q.options.length), ans: null };
+}
+function ichiInner() {
+  if (!ichi) newIchi();
+  const q = ichi.q, i = ichi.i, opt = q.explanation.options[i];
+  const truth = !!opt.correct; // 正誤の基準：その肢の記述自体が正しいか（correct フラグ）
+  let h = "<div class='row spread'><span class='meta'>この文は正しい？</span>"
+    + (ichiScore.n ? "<span class='meta'>今回の成績 " + ichiScore.ok + " / " + ichiScore.n + "問</span>" : "") + "</div>"
+    + "<div class='ichi-stmt'>" + esc(q.options[i]) + "</div>";
+  if (ichi.ans == null) {
+    h += "<details class='ctx'><summary>前提を確認したいとき（元の問題文）</summary>" + esc(q.question) + "</details>"
+      + "<div class='ox' style='margin-top:10px'><button class='btn' data-act='ichi' data-v='o'>○</button><button class='btn' data-act='ichi' data-v='x'>×</button></div>";
+  } else {
+    const ok = ichi.ans === truth;
+    h += "<div class='expl'><div class='verdict " + (ok ? "ok" : "ng") + "'>" + (ok ? "正解！" : "不正解…") + "　答えは " + (truth ? "○（正しい文）" : "×（誤った文）") + "</div>"
+      + "<div class='optline'><span class='tag " + (truth ? "t" : "f") + "'>" + (truth ? "○" : "×") + "</span>" + esc(opt.text) + "</div>"
+      + "<div class='basis'><b>出典：" + esc(sourceLabel(q)) + "</b>（分野：" + esc(q.field_name) + "　テーマ：" + esc(q.theme) + "）<br>"
+      + "問題文：" + esc(q.question) + "<br>要約：" + esc(q.explanation.summary) + "</div></div>"
+      + "<div class='row' style='margin-top:12px'><button class='btn primary' data-act='ichinext'>次の問題 →</button></div>";
+  }
+  return h;
+}
+function ichiHtml() {
+  return "<div class='card'><h2>一問一答コーナー</h2><div class='meta'>収録問題の選択肢から1つをランダムに出題します。その文が正しいか○×で答えましょう（「誤っているもの」を選ぶ問題の正解肢は×になります）。</div><div id='ichi'>" + ichiInner() + "</div></div>";
+}
+function refreshIchi() { const el = document.getElementById("ichi"); if (el) el.innerHTML = ichiInner(); }
+
+function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+// 練習エンジンが扱う問題リスト（回単位 or 分野別）
+function practiceList() { return view.list || setData(view.set).questions; }
+function progressOfList(qs) {
+  const recs = allRecords(); let answered = 0, correct = 0;
+  for (const q of qs) { const p = pickOf(recs, q); if (p != null) { answered++; if (p === q.answer) correct++; } }
+  return { answered, correct, total: qs.length };
+}
+
 function render() {
   if (view.name === "home") return renderHome();
   if (view.name === "practice") return renderPractice();
@@ -89,7 +327,10 @@ function render() {
 }
 
 function renderHome() {
-  let h = "<h1>マンション管理士 オリジナル問題集</h1><div class='sub'>本試験形式（50問・四肢択一）のオリジナル問題です。直近の法改正・判例を中心に、本試験よりかなり難しめに作っています。</div>";
+  const stats = officialStats();
+  let h = countdownHtml()
+    + "<h1>マンション管理士 オリジナル問題集</h1><div class='sub'>本試験形式（50問・四肢択一）のオリジナル問題です。直近の法改正・判例を中心に、本試験よりかなり難しめに作っています。</div>"
+    + modesHtml() + summaryHtml(stats);
   for (const s of DATA.sets) {
     const p = progressOf(s.set);
     const pct = p.total ? Math.round((p.answered / p.total) * 100) : 0;
@@ -107,8 +348,10 @@ function renderHome() {
       + (p.answered ? "<button class='btn' data-act='reset' data-set='" + s.set + "'>記録をリセット</button>" : "")
       + "</div></div>";
   }
+  h += fieldCornerHtml(stats) + ichiHtml();
   h += "<div class='notice'>非公式の学習用サイトです。マンション管理業協会および公式試験とは無関係です。問題はすべてオリジナルで、解説には根拠条文を付けています。学習記録はこの端末の中だけに保存されます。</div>";
   app.innerHTML = h;
+  drawRadar(stats);
 }
 
 function explanationHtml(q, picked) {
@@ -125,12 +368,13 @@ function explanationHtml(q, picked) {
 }
 
 function renderPractice() {
-  const s = setData(view.set), qs = s.questions, q = qs[view.idx];
-  const r = records(view.set), picked = r[q.id];
-  const p = progressOf(view.set);
-  let h = "<div class='row spread'><button class='btn' data-act='home'>← もどる</button><span class='meta'>" + esc(s.title) + "　" + (view.idx + 1) + " / " + qs.length + "問　正解 " + p.correct + "問</span></div>"
+  const qs = practiceList(), q = qs[view.idx];
+  const recs = allRecords(), picked = pickOf(recs, q);
+  const p = progressOfList(qs);
+  const title = view.list ? "分野別：" + view.listTitle : setData(view.set).title;
+  let h = "<div class='row spread'><button class='btn' data-act='home'>← もどる</button><span class='meta'>" + esc(title) + "　" + (view.idx + 1) + " / " + qs.length + "問　正解 " + p.correct + "問</span></div>"
     + "<div class='pbar'><i style='width:" + Math.round((p.answered / p.total) * 100) + "%'></i></div>"
-    + "<div class='card'><div class='meta'>分野：" + esc(q.field_name) + "　テーマ：" + esc(q.theme) + "</div>"
+    + "<div class='card'><div class='meta'>" + (view.list ? "出典：" + esc(sourceLabel(q)) + "　" : "") + "分野：" + esc(q.field_name) + "　テーマ：" + esc(q.theme) + "</div>"
     + "<div class='stem'>問" + (view.idx + 1) + "　" + esc(q.question) + "</div><div class='choices'>";
   q.options.forEach((opt, i) => {
     const no = i + 1;
@@ -145,7 +389,7 @@ function renderPractice() {
     + "<button class='btn primary' data-act='next'" + (view.idx === qs.length - 1 ? " disabled" : "") + ">次の問題 →</button></div></div>"
     + "<div class='card'><div class='meta'>問題一覧（タップで移動）</div><div class='grid'>"
     + qs.map((x, i) => {
-        const rp = r[x.id];
+        const rp = pickOf(recs, x);
         const cls = rp == null ? "" : (rp === x.answer ? "right" : "wrong");
         return "<button data-jump='" + i + "' class='" + cls + (i === view.idx ? " now" : "") + "'>" + (i + 1) + "</button>";
       }).join("")
@@ -209,8 +453,8 @@ app.addEventListener("click", (e) => {
   if (!t) return;
   if (t.dataset.jump != null) { view.idx = Number(t.dataset.jump); render(); window.scrollTo(0, 0); return; }
   if (t.dataset.pick != null) {
-    const s = setData(view.set), q = s.questions[view.idx];
-    savePick(view.set, q.id, Number(t.dataset.pick));
+    const q = practiceList()[view.idx];
+    savePick(q.set, q.id, Number(t.dataset.pick));
     render(); return;
   }
   if (t.dataset.epick != null) {
@@ -232,6 +476,21 @@ app.addEventListener("click", (e) => {
     examTimer = setInterval(() => { if (view.name === "exam") render(); }, 1000);
     render(); window.scrollTo(0, 0);
   }
+  else if (act === "fieldpractice") {
+    const fid = Number(t.dataset.field), f = OFFICIAL_FIELDS.find((x) => x.id === fid);
+    const list = shuffle(ALL_QUESTIONS.filter((q) => officialField(q) === fid));
+    const recs = allRecords();
+    let idx = list.findIndex((q) => pickOf(recs, q) == null); if (idx < 0) idx = 0;
+    view = { name: "practice", list, listTitle: f.short, idx }; render(); window.scrollTo(0, 0);
+  }
+  else if (act === "ichi") {
+    if (ichi && ichi.ans == null) {
+      ichi.ans = t.dataset.v === "o";
+      ichiScore.n++; if (ichi.ans === !!ichi.q.explanation.options[ichi.i].correct) ichiScore.ok++;
+    }
+    refreshIchi();
+  }
+  else if (act === "ichinext") { newIchi(); refreshIchi(); }
   else if (act === "reset") { store.set("rec" + t.dataset.set, {}); render(); }
   else if (act === "prev") { view.idx--; render(); window.scrollTo(0, 0); }
   else if (act === "next") { view.idx++; render(); window.scrollTo(0, 0); }
@@ -242,6 +501,7 @@ app.addEventListener("click", (e) => {
     view = { name: "result", set: view.set, answers: ans }; render();
   }
 });
+window.addEventListener("resize", () => { if (view.name === "home") drawRadar(officialStats()); });
 render();
 </script>
 </body>
