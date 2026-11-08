@@ -281,7 +281,7 @@ function fieldCornerHtml(stats) {
 // ===== 一問一答（記録は画面内のみ） =====
 let ichi = null; // { q, i, ans }
 const ichiScore = { n: 0, ok: 0 };
-// 一問一答の出題対象から、個数問題・組み合わせ問題を除外する。
+// 一問一答の出題対象から、個数問題・組み合わせ問題・計算問題を除外する。
 // 判定は問題文のキーワードではなく選択肢の形で行う：4つの選択肢がすべて
 //   個数表現（例「2個」「3つ」）または 記号の組み合わせ列挙（例「アとイ」「ア・イ・ウ」「aとbとc」）
 // になっている問題は、選択肢単体では文として正誤を判断できないため候補から外す。
@@ -291,7 +291,17 @@ const ICHI_COMBO_RE = /^[ア-オa-eａ-ｅ](\s*(と|・|、|及び)\s*[ア-オa-
 function isCountOrComboQuestion(q) {
   return q.options.every((o) => { const t = String(o).trim(); return ICHI_COUNT_RE.test(t) || ICHI_COMBO_RE.test(t); });
 }
-const ICHI_QUESTIONS = ALL_QUESTIONS.filter((q) => !isCountOrComboQuestion(q));
+// 計算問題：選択肢が計算結果の数値（金額・割合・面積など）になっている問題。
+// 判定：4つの選択肢の数値部分（数字列。桁区切り・小数点を含む）を同じ記号に置き換えると全肢が同じ文になり、
+// かつ数値を含む＝「数値だけが違う選択肢」の問題。数値だけの文は○×の文として成立しないため候補から外す。
+// （個数問題もこの形に当てはまるが、上の個数判定で除外済み。計算問題として新たに除外されるのは
+//   s1-q28・s3-q28・s4-q44 の3問）
+const ICHI_NUM_RE = /[0-9０-９][0-9０-９,，.．]*/g;
+function isCalcQuestion(q) {
+  const t = q.options.map((o) => String(o).trim().replace(ICHI_NUM_RE, "#"));
+  return t[0].includes("#") && t.every((x) => x === t[0]);
+}
+const ICHI_QUESTIONS = ALL_QUESTIONS.filter((q) => !isCountOrComboQuestion(q) && !isCalcQuestion(q));
 // 出題は「重複なしシャッフル」方式：候補全問をシャッフルした山から先頭の1問ずつ出し、
 // 山が尽きたら再シャッフルする（1周するまで同じ問題は出ない）。
 // 再シャッフル直後の先頭が直前に出た問題と同じなら、山の中の別の問題と入れ替えて連続重複も避ける。
@@ -333,7 +343,8 @@ function ichiInner() {
   return h;
 }
 function ichiHtml() {
-  return "<div class='card'><h2>一問一答コーナー</h2><div class='meta'>収録問題の選択肢から1つをランダムに出題します。その文が正しいか○×で答えましょう（「誤っているもの」を選ぶ問題の正解肢は×になります）。</div><div id='ichi'>" + ichiInner() + "</div></div>";
+  return "<div class='card'><h2>一問一答コーナー</h2><div class='meta'>収録問題の選択肢から1つをランダムに出題します。その文が正しいか○×で答えましょう（「誤っているもの」を選ぶ問題の正解肢は×になります）。</div>"
+    + "<div class='small' style='margin:4px 0 10px'>※ 個数問題・組み合わせ問題・計算問題は除いた" + ICHI_QUESTIONS.length + "問から出題します。</div><div id='ichi'>" + ichiInner() + "</div></div>";
 }
 function refreshIchi() { const el = document.getElementById("ichi"); if (el) el.innerHTML = ichiInner(); }
 
