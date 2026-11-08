@@ -292,9 +292,25 @@ function isCountOrComboQuestion(q) {
   return q.options.every((o) => { const t = String(o).trim(); return ICHI_COUNT_RE.test(t) || ICHI_COMBO_RE.test(t); });
 }
 const ICHI_QUESTIONS = ALL_QUESTIONS.filter((q) => !isCountOrComboQuestion(q));
+// 出題は「重複なしシャッフル」方式：候補全問をシャッフルした山から先頭の1問ずつ出し、
+// 山が尽きたら再シャッフルする（1周するまで同じ問題は出ない）。
+// 再シャッフル直後の先頭が直前に出た問題と同じなら、山の中の別の問題と入れ替えて連続重複も避ける。
+let ichiDeck = [], ichiPos = 0, ichiLast = null;
+function drawIchiQuestion() {
+  if (ichiPos >= ichiDeck.length) {
+    ichiDeck = shuffle(ICHI_QUESTIONS.slice());
+    ichiPos = 0;
+    if (ichiDeck.length > 1 && ichiDeck[0] === ichiLast) {
+      const j = 1 + Math.floor(Math.random() * (ichiDeck.length - 1));
+      [ichiDeck[0], ichiDeck[j]] = [ichiDeck[j], ichiDeck[0]];
+    }
+  }
+  ichiLast = ichiDeck[ichiPos++];
+  return ichiLast;
+}
 function newIchi() {
-  const q = ICHI_QUESTIONS[Math.floor(Math.random() * ICHI_QUESTIONS.length)];
-  ichi = { q, i: Math.floor(Math.random() * q.options.length), ans: null };
+  const q = drawIchiQuestion();
+  ichi = { q, i: Math.floor(Math.random() * q.options.length), ans: null }; // 提示する肢は従来どおりランダム
 }
 function ichiInner() {
   if (!ichi) newIchi();
