@@ -281,8 +281,19 @@ function fieldCornerHtml(stats) {
 // ===== 一問一答（記録は画面内のみ） =====
 let ichi = null; // { q, i, ans }
 const ichiScore = { n: 0, ok: 0 };
+// 一問一答の出題対象から、個数問題・組み合わせ問題を除外する。
+// 判定は問題文のキーワードではなく選択肢の形で行う：4つの選択肢がすべて
+//   個数表現（例「2個」「3つ」）または 記号の組み合わせ列挙（例「アとイ」「ア・イ・ウ」「aとbとc」）
+// になっている問題は、選択肢単体では文として正誤を判断できないため候補から外す。
+// （data.js 全200問中25問が該当：個数14問・組み合わせ11問。一部だけ該当する問題はなし）
+const ICHI_COUNT_RE = /^[0-9０-９]+\s*(個|つ)$/;
+const ICHI_COMBO_RE = /^[ア-オa-eａ-ｅ](\s*(と|・|、|及び)\s*[ア-オa-eａ-ｅ])+$/;
+function isCountOrComboQuestion(q) {
+  return q.options.every((o) => { const t = String(o).trim(); return ICHI_COUNT_RE.test(t) || ICHI_COMBO_RE.test(t); });
+}
+const ICHI_QUESTIONS = ALL_QUESTIONS.filter((q) => !isCountOrComboQuestion(q));
 function newIchi() {
-  const q = ALL_QUESTIONS[Math.floor(Math.random() * ALL_QUESTIONS.length)];
+  const q = ICHI_QUESTIONS[Math.floor(Math.random() * ICHI_QUESTIONS.length)];
   ichi = { q, i: Math.floor(Math.random() * q.options.length), ans: null };
 }
 function ichiInner() {
