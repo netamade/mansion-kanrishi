@@ -33,6 +33,10 @@ h2{font-size:20px;margin:4px 0 8px}
 .expl{border-top:2px dashed var(--border);margin-top:14px;padding-top:12px}
 .expl .verdict{font-weight:800;font-size:18px}
 .verdict.ok{color:var(--ok)}.verdict.ng{color:var(--ng)}
+.fb-mark{width:84px;height:84px;display:block;margin:0 auto 8px;animation:fb-pop .25s ease-out}
+.fb-batsu{width:64px;height:64px}
+@keyframes fb-pop{0%{transform:scale(.4);opacity:0}70%{transform:scale(1.12)}100%{transform:scale(1);opacity:1}}
+@media (prefers-reduced-motion: reduce){.fb-mark{animation:none}}
 .optline{margin:8px 0;padding:10px 12px;border-radius:14px;background:#FBF7F0;font-size:15px}
 .optline .tag{font-weight:800;margin-right:6px}
 .optline .tag.t{color:var(--ok)}.optline .tag.f{color:var(--ng)}
@@ -318,6 +322,10 @@ function drawIchiQuestion() {
   ichiLast = ichiDeck[ichiPos++];
   return ichiLast;
 }
+// 回答直後のフィードバックに出す図形マーク（正解＝花丸、不正解＝バツ）
+const FB_HANAMARU = '<svg class="fb-mark fb-hanamaru" viewBox="0 0 100 100" aria-hidden="true"><path d="M50 6 C72 4 92 22 94 46 C96 71 78 93 53 95 C28 97 7 79 6 54 C5 29 26 8 50 6 Z" fill="none" stroke="#e03a1e" stroke-width="5" stroke-linecap="round"/><path d="M50 18 C66 17 81 30 82 47 C83 65 69 82 52 83 C35 84 19 70 18 53 C17 35 33 19 50 18 Z" fill="none" stroke="#e03a1e" stroke-width="4" stroke-linecap="round"/><path d="M38 38 C44 30 58 29 64 37 M34 55 C31 45 36 33 45 29 M66 55 C69 65 63 76 54 79 M45 68 C53 73 65 70 69 61" fill="none" stroke="#e03a1e" stroke-width="4" stroke-linecap="round"/></svg>';
+const FB_BATSU = '<svg class="fb-mark fb-batsu" viewBox="0 0 100 100" aria-hidden="true"><path d="M22 22 L78 78 M78 22 L22 78" stroke="#34548f" stroke-width="11" stroke-linecap="round" fill="none"/></svg>';
+function fbMark(ok) { return ok ? FB_HANAMARU : FB_BATSU; }
 function newIchi() {
   const q = drawIchiQuestion();
   ichi = { q, i: Math.floor(Math.random() * q.options.length), ans: null }; // 提示する肢は従来どおりランダム
@@ -334,7 +342,7 @@ function ichiInner() {
       + "<div class='ox' style='margin-top:10px'><button class='btn' data-act='ichi' data-v='o'>○</button><button class='btn' data-act='ichi' data-v='x'>×</button></div>";
   } else {
     const ok = ichi.ans === truth;
-    h += "<div class='expl'><div class='verdict " + (ok ? "ok" : "ng") + "'>" + (ok ? "正解！" : "不正解…") + "　答えは " + (truth ? "○（正しい文）" : "×（誤った文）") + "</div>"
+    h += "<div class='expl'>" + fbMark(ok) + "<div class='verdict " + (ok ? "ok" : "ng") + "'>" + (ok ? "正解！" : "不正解…") + "　答えは " + (truth ? "○（正しい文）" : "×（誤った文）") + "</div>"
       + "<div class='optline'><span class='tag " + (truth ? "t" : "f") + "'>" + (truth ? "○" : "×") + "</span>" + esc(opt.text) + "</div>"
       + "<div class='basis'><b>出典：" + esc(sourceLabel(q)) + "</b>（分野：" + esc(q.field_name) + "　テーマ：" + esc(q.theme) + "）<br>"
       + "問題文：" + esc(q.question) + "<br>要約：" + esc(q.explanation.summary) + "</div></div>"
@@ -392,9 +400,10 @@ function renderHome() {
   drawRadar(stats);
 }
 
-function explanationHtml(q, picked) {
+// withMark：1問ごとの正誤フィードバック（練習モード）のときだけ図形マークを出す。模試の結果一覧では出さない
+function explanationHtml(q, picked, withMark) {
   const ok = picked === q.answer;
-  let h = "<div class='expl'><div class='verdict " + (ok ? "ok" : "ng") + "'>" + (ok ? "正解！" : "不正解…") + "　正解は " + q.answer + "</div>"
+  let h = "<div class='expl'>" + (withMark ? fbMark(ok) : "") + "<div class='verdict " + (ok ? "ok" : "ng") + "'>" + (ok ? "正解！" : "不正解…") + "　正解は " + q.answer + "</div>"
     + "<p>" + esc(q.explanation.summary) + "</p>";
   for (const o of q.explanation.options) {
     h += "<div class='optline'><span class='tag " + (o.correct ? "t" : "f") + "'>" + o.no + (o.correct ? " ○（記述は正しい）" : " ×（記述は誤り）") + "</span>" + esc(o.text) + "</div>";
@@ -422,7 +431,7 @@ function renderPractice() {
     h += "<button class='" + cls + "' data-pick='" + no + "'" + (picked != null ? " disabled" : "") + ">" + no + "．" + esc(opt) + "</button>";
   });
   h += "</div>";
-  if (picked != null) h += explanationHtml(q, picked);
+  if (picked != null) h += explanationHtml(q, picked, true);
   h += "<div class='row spread' style='margin-top:14px'><button class='btn' data-act='prev'" + (view.idx === 0 ? " disabled" : "") + ">← 前の問題</button>"
     + "<button class='btn primary' data-act='next'" + (view.idx === qs.length - 1 ? " disabled" : "") + ">次の問題 →</button></div></div>"
     + "<div class='card'><div class='meta'>問題一覧（タップで移動）</div><div class='grid'>"
